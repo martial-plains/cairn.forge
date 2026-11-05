@@ -144,18 +144,13 @@ use_package("lsp", #{
   vc: "https://github.com/martial-plains/forge-plugin-lsp",
   pin: "v0.1.0",
   commands: ["cairn", "xref-find-definitions"],
-  grant: #{ processes: [
-    "pyright-langserver", "pylsp", "basedpyright-langserver",
-    "jedi-language-server", "ruff", "rust-analyzer", "clangd", "ccls",
-    "gopls", "typescript-language-server", "deno", "bash-language-server",
-    "lua-language-server", "vscode-json-language-server",
-    "vscode-json-languageserver", "taplo",
-  ] },
 });
 ```
 
-Remove the servers you do not want and add any program you add to `cairn.json`.
-Forge asks before running the package build command the first time.
+Forge asks for permission to run the language servers when the plugin first
+loads; grant only the servers you use, and add any program you add to
+`cairn.json`. Forge asks before running the package build command the first
+time.
 
 ## Building
 
