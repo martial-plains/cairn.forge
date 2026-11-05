@@ -52,6 +52,16 @@ jobs:
           cat > "$FORGE_CONFIG_DIR/init.rhai" <<EOF
           use_package("$name", #{ vc: "$GITHUB_WORKSPACE" });
           EOF
-          forge --headless --init "$FORGE_CONFIG_DIR/init.rhai" --wait 2 --keys "y" --wait 240
+          forge --headless --init "$FORGE_CONFIG_DIR/init.rhai" \
+            --keys "M-x" --type "reload-init-file" --keys "RET" \
+            --wait 2 --keys "y" --wait 2 --keys "y" --wait 2 --keys "y" --wait 600 &
+          forge_pid=$!
+          for _ in $(seq 1 150); do
+            [ -f "$FORGE_CONFIG_DIR/plugins/$name.wasm" ] && break
+            kill -0 "$forge_pid" 2>/dev/null || break
+            sleep 2
+          done
           test -f "$FORGE_CONFIG_DIR/plugins/$name.wasm"
+          kill "$forge_pid" 2>/dev/null || true
+          wait "$forge_pid" 2>/dev/null || true
           forge --check-plugin "$FORGE_CONFIG_DIR/plugins/$name.wasm" >/dev/null
