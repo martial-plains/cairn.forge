@@ -141,8 +141,7 @@ Add this to `~/.config/forge/init.rhai`:
 
 ```rhai
 use_package("lsp", #{
-  vc: "https://github.com/martial-plains/forge-plugin-lsp",
-  pin: "v0.1.0",
+  vc: "https://github.com/martial-plains/cairn.forge.git",
   commands: ["cairn", "xref-find-definitions"],
 });
 ```
