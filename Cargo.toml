@@ -1,0 +1,45 @@
+[package]
+name = "forge-lsp"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "Cairn: a Language Server Protocol client (Flymake diagnostics, xref, eldoc, rename, code actions, formatting, completion, hierarchies)"
+
+[package.metadata.forge]
+name = "lsp"
+
+[package.metadata.forge.permissions]
+# The language servers it may start (config.rs's defaults; programs named
+# in cairn.json need adding here too). Remove the ones you do not want.
+processes = [
+    "pyright-langserver",
+    "pylsp",
+    "basedpyright-langserver",
+    "jedi-language-server",
+    "ruff",
+    "rust-analyzer",
+    "clangd",
+    "ccls",
+    "gopls",
+    "typescript-language-server",
+    "deno",
+    "bash-language-server",
+    "lua-language-server",
+    "vscode-json-language-server",
+    "vscode-json-languageserver",
+    "taplo",
+]
+
+# Standalone: not part of the main workspace build.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+forge-plugin-sdk = { git = "https://github.com/martial-plains/forge" }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
