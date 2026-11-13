@@ -24,10 +24,6 @@ summary = "Forget a progress overlay that Forge closed."
 name = "cairn-help-closed"
 summary = "Forget a help overlay that Forge closed."
 
-[[package.metadata.forge.commands]]
-name = "cairn-completion-auto"
-summary = "Toggle the completion popup opening by itself while typing."
-
 # The progress panel that follows the servers' work-done reports.
 [[package.metadata.forge.overlay-kinds]]
 id = "progress"

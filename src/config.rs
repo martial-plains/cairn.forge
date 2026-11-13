@@ -9,7 +9,6 @@
 //! ```json
 //! {
 //!   "autostart": true,
-//!   "help": true,
 //!   "highlight-symbols": true,
 //!   "server-programs": [
 //!     { "modes": ["python-mode"], "language-id": "python",
@@ -43,13 +42,11 @@ pub struct Config {
     /// Start servers for files as they open (Emacs's eglot-ensure on every
     /// mode with a server); off, only `M-x cairn` starts one.
     pub autostart: bool,
-    /// Show documentation for what's at point when idle.
-    pub help: bool,
     /// Highlight the other occurrences of the symbol at point.
     pub highlight: bool,
     pub servers: Vec<ServerSpec>,
     pub workspace: Value,
-    /// Seconds idle before help and highlighting.
+    /// Seconds idle before highlighting.
     pub idle: f64,
     /// Lines kept in each server's events buffer.
     pub events_size: usize,
@@ -114,7 +111,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             autostart: true,
-            help: true,
             highlight: true,
             servers: default_servers(),
             workspace: Value::Object(Map::new()),
@@ -146,9 +142,6 @@ impl Config {
         let flag = |k: &str| o.get(k).and_then(Value::as_bool);
         if let Some(b) = flag("autostart") {
             self.autostart = b;
-        }
-        if let Some(b) = flag("help") {
-            self.help = b;
         }
         if let Some(b) = flag("highlight-symbols") {
             self.highlight = b;

@@ -45,12 +45,12 @@ environment, which it uses only to find server programs.
     (RET visits, `o` shows, `n`/`p` move).
   - `cairn-find-declaration`, `cairn-find-implementation` and
     `cairn-find-typeDefinition` work the same way.
-- **Help.** When idle, an overlay at point shows the documentation of
-  the symbol at point. On an argument of a call it shows the call's
+- **Help.** `C-h .` (`cairn-help`) shows the documentation of the symbol
+  at point in an overlay. On an argument of a call it shows the call's
   signature instead, with the current parameter marked `‹so›`. Other
-  occurrences of the symbol get the `symbol-highlight` face. `C-h .`
-  (`cairn-help`) asks straight away, and `M-x cairn-help-buffer` shows the
-  full documentation. `C-g` closes the overlay.
+  occurrences of the symbol get the `symbol-highlight` face when idle.
+  `M-x cairn-help-buffer` shows the full documentation. `C-g` closes the
+  overlay.
 - **Editing.**
   - `cairn-rename` renames everywhere the server knows the symbol.
   - `cairn-format` formats the region, or the buffer when there is no
@@ -62,10 +62,9 @@ environment, which it uses only to find server programs.
   into buffers, never straight to disk. Files that weren't open are
   visited and left unsaved for you to review. File creations, renames
   and deletions requested by the server happen as asked.
-- **Completion.** It is a completion source that opens a popup at point,
-  with the selected candidate's documentation beside it. The popup opens
-  after a typing pause or on `M-TAB`, and `C-g` closes it.
-  `M-x cairn-completion-auto` turns the automatic popup off and on.
+- **Completion.** It is a completion source that opens a popup at point
+  on `M-TAB`, with the selected candidate's documentation beside it.
+  `C-g` closes it.
 - **Navigation.**
   - `M-g i` in a managed buffer is imenu built from the server's symbols.
   - `cairn-show-call-hierarchy` and `cairn-show-type-hierarchy` draw trees
@@ -81,7 +80,6 @@ environment, which it uses only to find server programs.
     or stop servers.
   - `cairn-doctor` reports modes whose servers are not on `PATH`, and
     configuration files that don't parse.
-  - `cairn-completion-auto` toggles the automatic completion popup.
   - Also: `cairn-forget-pending-continuations`, `cairn-clear-status`.
 
 The old `lsp-*` command names still work.
@@ -95,7 +93,6 @@ own `.cairn.json` at its root adds to it, playing the part of Emacs's
 ```json
 {
   "autostart": true,
-  "help": true,
   "highlight-symbols": true,
   "idle-delay": 0.5,
   "events-buffer-size": 2000,

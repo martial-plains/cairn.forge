@@ -16,10 +16,10 @@
 //!   symbols, `M-,` back and `C-M-,` forward again; several results go in
 //!   `*xref*`. `cairn-find-declaration`, `-implementation`,
 //!   `-typeDefinition` too.
-//! - **Help**: idle at a symbol, an overlay shows the signature of the
-//!   call around point or the documentation of the symbol, and the other
-//!   occurrences of the symbol are highlighted. `C-h .` (`cairn-help`) asks
-//!   at once, and `M-x cairn-help-buffer` shows all of it in `*cairn-help*`.
+//! - **Help**: `C-h .` (`cairn-help`) shows an overlay at point with the
+//!   signature of the call or the documentation of the symbol, and the
+//!   other occurrences are highlighted when idle. `M-x cairn-help-buffer`
+//!   shows all of it in `*cairn-help*`.
 //! - **Editing**: `cairn-rename`, `cairn-format` (the region, or the
 //!   buffer), `cairn-code-actions` and the shortcuts
 //!   `cairn-code-action-organize-imports`, `-quickfix`, `-extract`,
@@ -175,8 +175,6 @@ struct State {
     resolving: HashMap<u32, Resolving>,
     /// The host id of the overlay showing work-done progress.
     progress_overlay: Option<String>,
-    /// Whether the completion popup opens by itself while typing.
-    completion_auto: bool,
     /// Numbers server keys.
     serial: u64,
 }
@@ -2075,6 +2073,14 @@ fn hover_help(key: &str, params: Value, force: bool, spot: (u32, u64, u32, u32))
     });
 }
 
+/// Highlight the other occurrences of the symbol at point while idle.
+fn highlight_at_point() {
+    let Ok((b, key, uri)) = current_doc() else {
+        return;
+    };
+    highlight(&b, &key, &uri);
+}
+
 /// documentHighlight: the other occurrences of the symbol at point.
 fn highlight(b: &Buffer, key: &str, uri: &str) {
     if !with(|s| s.config.highlight) || !can(key, "documentHighlightProvider") {
@@ -2901,8 +2907,7 @@ fn resolve_location(sel: &Selection) {
 
 fn init() -> Result<(), String> {
     define_list_modes();
-    with(|s| s.completion_auto = true);
-    completion::set_at_point_ui(true, true, 200, 2, 10);
+    completion::set_at_point_ui(true, false, 200, 2, 10);
     completion::set_popup_info(true, false, 250, 60, 10);
 
     on(EventKind::BufferOpened, |e| {
@@ -3083,23 +3088,6 @@ fn init() -> Result<(), String> {
         "cairn-help-closed",
         "Forget a help overlay that Forge closed.",
         |_| help_overlay_closed(),
-    )?;
-    command(
-        "cairn-completion-auto",
-        "Toggle the completion popup opening by itself while typing.",
-        |_| {
-            let auto = with(|s| {
-                s.completion_auto = !s.completion_auto;
-                s.completion_auto
-            });
-            completion::set_at_point_ui(true, auto, 200, 2, 10);
-            message(if auto {
-                "Completion popup: automatic"
-            } else {
-                "Completion popup: only on M-TAB"
-            });
-            Ok(())
-        },
     )?;
 
     // --- servers
@@ -3390,11 +3378,11 @@ fn init() -> Result<(), String> {
     let idle = config().idle;
     when_idle(
         "cairn--on-idle",
-        "Cairn's idle work: help and symbol highlighting.",
+        "Cairn's idle work: symbol highlighting.",
         idle,
         || {
-            if config().help {
-                help_at_point(false);
+            if config().highlight {
+                highlight_at_point();
             }
         },
     )?;
