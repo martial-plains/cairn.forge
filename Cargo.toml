@@ -8,9 +8,41 @@ description = "Cairn: a Language Server Protocol client (Flymake diagnostics, xr
 [package.metadata.forge]
 name = "lsp"
 
+[[package.metadata.forge.commands]]
+name = "cairn-doctor"
+summary = "Check that the language servers Cairn may start are installed."
+
+[[package.metadata.forge.commands]]
+name = "cairn-progress-closed"
+summary = "Forget a progress overlay that Forge closed."
+
+# The progress panel that follows the servers' work-done reports.
+[[package.metadata.forge.overlay-kinds]]
+id = "progress"
+handler = "cairn-progress-closed"
+placement = "bottom"
+height = 4
+title = "Cairn"
+
+# The host removes this plugin's overlays when it unloads; forget the id
+# when the user closes one with C-g or overlay-close.
+[[package.metadata.forge.hooks]]
+id = "progress-closed"
+event = "overlay.closed"
+handler = "cairn-progress-closed"
+payload-version = 1
+
+[[package.metadata.forge.doctor-checks]]
+id = "servers"
+handler = "cairn-doctor"
+label = "Language servers"
+description = "The server programs Cairn's modes try are on PATH."
+severity = "warning"
+
 [package.metadata.forge.permissions]
 # The language servers it may start (config.rs's defaults; programs named
 # in cairn.json need adding here too). Remove the ones you do not want.
+environment = true
 processes = [
     "pyright-langserver",
     "pylsp",

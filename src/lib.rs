@@ -45,9 +45,11 @@ pub mod protocol;
 use config::Config;
 use forge_plugin_sdk::{
     Buffer, CompletionRequest, Decoration, DetailedCandidate, Event, EventKind, Level, Position,
-    Process, Scope, Selection, Span, bind_in_mode, command, completing_read, completion_source,
-    decorations, detailed_candidate, files, forge_plugin, keymap, log_at, message, minibuffer,
-    modes, on, on_resolve_location, project_root, read_string, spawn, when_idle, xref,
+    Process, Scope, Selection, Span, answer_registration, bind_in_mode, close_overlay, command,
+    completing_read, completion_source, current_hook, current_registration, decorations,
+    detailed_candidate, environment, files, forge_plugin, keymap, log_at, message, minibuffer,
+    modes, on, on_resolve_location, open_overlay, project_root, read_string, spawn, update_overlay,
+    when_idle, xref,
 };
 use protocol::{
     LspEdit, LspLocation, LspPos, char_col, frame, path_of, unframe, uri_of, utf16_col,
@@ -170,6 +172,8 @@ struct State {
     eldoc_doc: String,
     /// Completion items across servers waiting on `completionItem/resolve`.
     resolving: HashMap<u32, Resolving>,
+    /// The host id of the overlay showing work-done progress.
+    progress_overlay: Option<String>,
     /// Numbers server keys.
     serial: u64,
 }
@@ -227,6 +231,130 @@ fn reload_config() {
         s.project_configs.clear();
     });
     let _ = config();
+}
+
+/// Whether `program` is found the way a process launch would find it.
+fn program_on_path(program: &str) -> bool {
+    if program.is_empty() {
+        return false;
+    }
+    if program.contains('/') || program.contains('\\') {
+        return files::exists(program);
+    }
+    let Ok(vars) = environment::variables() else {
+        return false;
+    };
+    let Some(path) = vars
+        .iter()
+        .find(|(name, _)| name == "PATH")
+        .map(|(_, value)| value.clone())
+    else {
+        return false;
+    };
+    let sep = environment::path_separator();
+    let sep = sep.chars().next().unwrap_or(':');
+    let windows = environment::system_type() == "windows-nt";
+    let extensions: Vec<String> = if windows {
+        vars.iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("PATHEXT"))
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string())
+            .split(';')
+            .filter(|ext| !ext.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    for dir in path.split(sep).filter(|dir| !dir.is_empty()) {
+        let base = format!("{}/{}", dir.trim_end_matches(['/', '\\']), program);
+        if files::exists(&base) {
+            return true;
+        }
+        if extensions
+            .iter()
+            .any(|ext| files::exists(&format!("{base}{ext}")))
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// The findings of the server check, shared by `package-doctor` and
+/// `M-x cairn-doctor`.
+fn doctor_findings() -> Vec<Value> {
+    let mut findings: Vec<Value> = Vec::new();
+    let mut cfg = Config::default();
+    let path = "~/.config/forge/cairn.json";
+    match files::read(path) {
+        Ok(text) => {
+            if let Err(e) = cfg.apply(&text) {
+                findings.push(json!({
+                    "severity": "error",
+                    "message": format!("{path}: {e}"),
+                    "fix": "Fix the JSON (or remove the file), then run the check again.",
+                }));
+            }
+        }
+        Err(_) => {}
+    }
+    let mut modes: BTreeMap<String, Vec<&config::ServerSpec>> = BTreeMap::new();
+    for spec in &cfg.servers {
+        for mode in &spec.modes {
+            modes.entry(mode.clone()).or_default().push(spec);
+        }
+    }
+    let mut checked: HashMap<String, bool> = HashMap::new();
+    for (mode, specs) in modes {
+        let found = specs.iter().any(|spec| {
+            spec.command.first().is_some_and(|program| {
+                *checked
+                    .entry(program.clone())
+                    .or_insert_with(|| program_on_path(program))
+            })
+        });
+        if !found {
+            let tried: Vec<String> = specs
+                .iter()
+                .filter(|spec| !spec.command.is_empty())
+                .map(|spec| spec.command.join(" "))
+                .collect();
+            findings.push(json!({
+                "severity": "warning",
+                "message": format!(
+                    "{mode}: no language server found on PATH (tried {})",
+                    tried.join(", ")
+                ),
+                "fix": "Install one of the servers, or add one to ~/.config/forge/cairn.json.",
+            }));
+        }
+    }
+    findings
+}
+
+/// The `[[doctor-checks]]` handler, and `M-x cairn-doctor` outside it.
+fn doctor() -> Result<(), String> {
+    let findings = doctor_findings();
+    if current_registration().is_some() {
+        let answer = serde_json::to_string(&findings).map_err(|e| e.to_string())?;
+        return answer_registration(&answer);
+    }
+    if findings.is_empty() {
+        message("[cairn] every mode has a language server on PATH");
+    } else {
+        for finding in findings {
+            let text = finding["message"].as_str().unwrap_or("").to_string();
+            let severity = finding["severity"].as_str().unwrap_or("warning");
+            let level = if severity == "error" {
+                Level::Error
+            } else {
+                Level::Warn
+            };
+            log_at(level, &text);
+        }
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------ messaging
@@ -710,6 +838,65 @@ fn on_progress(key: &str, params: &Value) {
         sv.progress.insert(token, text);
     });
     update_mode_lines_for(key);
+    refresh_progress_overlay();
+}
+
+/// What every server currently reports, one row per token.
+fn progress_rows() -> Vec<String> {
+    with(|s| {
+        let mut rows = Vec::new();
+        for sv in s.servers.values() {
+            for text in sv.progress.values() {
+                rows.push(format!("{}: {text}", sv.name));
+            }
+        }
+        rows
+    })
+}
+
+/// Show the servers' work-done progress in the declared overlay, or take
+/// the overlay down when nothing is in flight.
+fn refresh_progress_overlay() {
+    let rows = progress_rows();
+    if rows.is_empty() {
+        if let Some(id) = with(|s| s.progress_overlay.take()) {
+            let _ = close_overlay(&id);
+        }
+        return;
+    }
+    let row_refs: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let open = with(|s| s.progress_overlay.clone());
+    match open {
+        Some(id) => {
+            if update_overlay(&id, &row_refs).is_err() {
+                // Forge closed it (C-g or overlay-close) without our hook
+                // having cleared the id yet: open it again.
+                with(|s| s.progress_overlay = None);
+                refresh_progress_overlay();
+            }
+        }
+        None => {
+            if let Ok(id) = open_overlay("progress", &row_refs) {
+                with(|s| s.progress_overlay = Some(id));
+            }
+        }
+    }
+}
+
+/// The `overlay.closed` observer: forget the progress overlay's id when the
+/// host takes it down.
+fn progress_overlay_closed() -> Result<(), String> {
+    let Some(call) = current_hook() else {
+        return Ok(());
+    };
+    let payload: Value = serde_json::from_str(&call.payload).unwrap_or(Value::Null);
+    let id = payload["id"].as_str().unwrap_or("");
+    with(|s| {
+        if s.progress_overlay.as_deref() == Some(id) {
+            s.progress_overlay = None;
+        }
+    });
+    Ok(())
 }
 
 fn handle(key: &str, msg: Value) {
@@ -2844,6 +3031,17 @@ fn init() -> Result<(), String> {
         });
     })?;
     on_resolve_location(resolve_location);
+
+    command(
+        "cairn-doctor",
+        "Check that the language servers Cairn may start are installed.",
+        |_| doctor(),
+    )?;
+    command(
+        "cairn-progress-closed",
+        "Forget a progress overlay that Forge closed.",
+        |_| progress_overlay_closed(),
+    )?;
 
     // --- servers
     command(

@@ -37,7 +37,7 @@ dependencies = [
 [[package]]
 name = "forge-plugin-sdk"
 version = "0.1.0"
-source = "git+https://github.com/martial-plains/forge#62da0a02b4a6fb035e98f00371524bc538e48bd3"
+source = "git+https://github.com/martial-plains/forge#669db77b1d95817abca286f4a5876557cc5cccdb"
 dependencies = [
  "forge-plugin-sdk-macros",
  "wit-bindgen",
@@ -46,7 +46,7 @@ dependencies = [
 [[package]]
 name = "forge-plugin-sdk-macros"
 version = "0.1.0"
-source = "git+https://github.com/martial-plains/forge#62da0a02b4a6fb035e98f00371524bc538e48bd3"
+source = "git+https://github.com/martial-plains/forge#669db77b1d95817abca286f4a5876557cc5cccdb"
 dependencies = [
  "toml",
 ]

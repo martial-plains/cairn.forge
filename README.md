@@ -4,7 +4,8 @@ A Language Server Protocol client that works like Emacs's Eglot. Open a
 file whose mode has a server and that server starts for the project (one
 per server program and project root). `M-x cairn` starts one by hand. The
 mode line shows `[cairn:PROJECT]`, any progress the server reports, and
-the file's Flymake counts (`2E 1W`).
+the file's Flymake counts (`2E 1W`). While a server reports work in
+progress, a small panel at the bottom of the screen lists it too.
 
 ## Servers
 
@@ -25,7 +26,9 @@ Alternatives are tried in order; the first that starts wins.
 `[package.metadata.forge.permissions]` in Cargo.toml lists the programs it
 may start (the `processes` permission). Forge asks before granting it,
 because a server runs outside the sandbox. A program you add in
-cairn.json must be added there too.
+cairn.json must be added there too. `M-x cairn-doctor` checks that each
+mode's servers are on `PATH`; the `environment` grant lets it read the
+environment, which it uses only to find server programs.
 
 ## What it does
 
@@ -73,6 +76,8 @@ cairn.json must be added there too.
   - `cairn-events-buffer` shows the JSON-RPC traffic.
   - `cairn-reconnect`, `cairn-shutdown` and `cairn-shutdown-all` restart
     or stop servers.
+  - `cairn-doctor` reports modes whose servers are not on `PATH`, and
+    configuration files that don't parse.
   - Also: `cairn-forget-pending-continuations`, `cairn-clear-status`.
 
 The old `lsp-*` command names still work.
