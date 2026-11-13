@@ -348,7 +348,7 @@ pub fn signature_summary(result: &Value) -> String {
 
 /// A `ParameterInformation`'s label: a string, or `[start, end]` UTF-16
 /// offsets into the signature's label.
-/// The active signature on one line, for the echo area (eldoc): its
+/// The active signature on one line, for the help overlay: its
 /// label with the active parameter marked, `name: ` in front when the
 /// label doesn't start with the name (pyright's `(x: int) -> str`).
 pub fn signature_line(result: &Value, name: &str) -> String {

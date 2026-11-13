@@ -16,10 +16,10 @@
 //!   symbols, `M-,` back and `C-M-,` forward again; several results go in
 //!   `*xref*`. `cairn-find-declaration`, `-implementation`,
 //!   `-typeDefinition` too.
-//! - **Eldoc**: idle at a symbol, the echo area shows the signature of the
+//! - **Help**: idle at a symbol, an overlay shows the signature of the
 //!   call around point or the documentation of the symbol, and the other
-//!   occurrences of the symbol are highlighted. `C-h .` (`eldoc`) asks at
-//!   once, `M-x eldoc-doc-buffer` shows all of it in `*eldoc*`.
+//!   occurrences of the symbol are highlighted. `C-h .` (`cairn-help`) asks
+//!   at once, and `M-x cairn-help-buffer` shows all of it in `*cairn-help*`.
 //! - **Editing**: `cairn-rename`, `cairn-format` (the region, or the
 //!   buffer), `cairn-code-actions` and the shortcuts
 //!   `cairn-code-action-organize-imports`, `-quickfix`, `-extract`,
@@ -46,8 +46,8 @@ use config::Config;
 use forge_plugin_sdk::{
     Buffer, CompletionRequest, Decoration, DetailedCandidate, Event, EventKind, Level, Position,
     Process, Scope, Selection, Span, answer_registration, bind_in_mode, close_overlay, command,
-    completing_read, completion_source, current_hook, current_registration, decorations,
-    detailed_candidate, environment, files, forge_plugin, keymap, log_at, message, minibuffer,
+    completing_read, completion, completion_source, current_hook, current_registration,
+    decorations, detailed_candidate, environment, files, forge_plugin, keymap, log_at, message,
     modes, on, on_resolve_location, open_overlay, project_root, read_string, spawn, update_overlay,
     when_idle, xref,
 };
@@ -165,19 +165,18 @@ struct State {
     /// What each line of a list buffer (*xref*, diagnostics) points at.
     lists: HashMap<u32, Vec<Option<LspLocation>>>,
     hierarchies: HashMap<u32, Hierarchy>,
-    /// The last place eldoc looked at, and what it showed.
-    last_eldoc: Option<(u32, u64, u32, u32)>,
-    eldoc_shown: Option<String>,
-    /// The full documentation for *eldoc*.
-    eldoc_doc: String,
+    /// The last place help looked at.
+    last_help: Option<(u32, u64, u32, u32)>,
+    /// The host id of the overlay showing documentation at point.
+    help_overlay: Option<String>,
+    /// The full documentation for the help buffer.
+    help_doc: String,
     /// Completion items across servers waiting on `completionItem/resolve`.
     resolving: HashMap<u32, Resolving>,
     /// The host id of the overlay showing work-done progress.
     progress_overlay: Option<String>,
-    /// Server notifications, newest first.
-    messages: Vec<String>,
-    /// The host id of the overlay showing those notifications.
-    messages_overlay: Option<String>,
+    /// Whether the completion popup opens by itself while typing.
+    completion_auto: bool,
     /// Numbers server keys.
     serial: u64,
 }
@@ -775,8 +774,7 @@ fn on_server_request(key: &str, msg: &Value) {
                 .filter_map(|a| a["title"].as_str().map(String::from))
                 .collect();
             if actions.is_empty() {
-                let t = params["type"].as_u64().unwrap_or(3);
-                add_server_message(message_severity(t), key, &text);
+                message(&format!("{}: {text}", server_name(key)));
                 return reply_ok(key, &id, Value::Null);
             }
             let k = key.to_string();
@@ -794,7 +792,7 @@ fn on_server_request(key: &str, msg: &Value) {
         "window/showDocument" => {
             let uri = params["uri"].as_str().unwrap_or("");
             if params["external"].as_bool() == Some(true) || !uri.starts_with("file://") {
-                add_server_message("info", key, &format!("The server wants you to open {uri}"));
+                message(&format!("[cairn] The server wants you to open {uri}"));
                 return reply_ok(key, &id, json!({ "success": false }));
             }
             let loc = params
@@ -904,77 +902,6 @@ fn progress_overlay_closed() -> Result<(), String> {
     Ok(())
 }
 
-/// A word for an LSP MessageType (1 error, 2 warning, 3 info, 4 log).
-fn message_severity(t: u64) -> &'static str {
-    match t {
-        1 => "error",
-        2 => "warning",
-        3 => "info",
-        _ => "log",
-    }
-}
-
-/// Remember a server notification on top of the messages overlay.
-fn add_server_message(severity: &str, key: &str, text: &str) {
-    let row = format!("{severity}: {}: {text}", server_name(key));
-    let duplicate = with(|s| s.messages.first() == Some(&row));
-    if !duplicate {
-        with(|s| {
-            s.messages.insert(0, row);
-            s.messages.truncate(50);
-        });
-    }
-    refresh_messages_overlay();
-}
-
-/// Show the remembered server notifications, or take the overlay down when
-/// there are none.
-fn refresh_messages_overlay() {
-    let rows = with(|s| s.messages.clone());
-    if rows.is_empty() {
-        if let Some(id) = with(|s| s.messages_overlay.take()) {
-            let _ = close_overlay(&id);
-        }
-        return;
-    }
-    let row_refs: Vec<&str> = rows.iter().map(String::as_str).collect();
-    let open = with(|s| s.messages_overlay.clone());
-    match open {
-        Some(id) => {
-            if update_overlay(&id, &row_refs).is_err() {
-                with(|s| s.messages_overlay = None);
-                refresh_messages_overlay();
-            }
-        }
-        None => {
-            if let Ok(id) = open_overlay("messages", &row_refs) {
-                with(|s| s.messages_overlay = Some(id));
-            }
-        }
-    }
-}
-
-/// Dismiss the server notifications, whether the user asked for it or the
-/// host closed the overlay.
-fn clear_messages() -> Result<(), String> {
-    if let Some(call) = current_hook() {
-        let payload: Value = serde_json::from_str(&call.payload).unwrap_or(Value::Null);
-        let id = payload["id"].as_str().unwrap_or("");
-        let ours = with(|s| s.messages_overlay.as_deref() == Some(id));
-        if !ours {
-            return Ok(());
-        }
-    }
-    let id = with(|s| {
-        s.messages.clear();
-        s.messages_overlay.take()
-    });
-    if let Some(id) = id {
-        let _ = close_overlay(&id);
-    }
-    Ok(())
-}
-
 fn handle(key: &str, msg: Value) {
     log_event(key, "server", &msg);
     let has_id = msg.get("id").is_some_and(|i| !i.is_null());
@@ -986,20 +913,19 @@ fn handle(key: &str, msg: Value) {
             let t = msg["params"]["type"].as_u64().unwrap_or(4);
             let text = msg["params"]["message"].as_str().unwrap_or("");
             if t <= 3 {
-                add_server_message(message_severity(t), key, text);
+                message(&format!("[cairn] {}: {text}", server_name(key)));
             }
             log_at(Level::Info, &format!("{}: {text}", server_name(key)));
         }
         Some("window/logMessage") => {
-            let t = msg["params"]["type"].as_u64().unwrap_or(4);
-            let text = msg["params"]["message"].as_str().unwrap_or("");
-            // Errors and warnings also go to the messages overlay, so their
-            // log lines stay out of the echo area.
-            let level = if t <= 2 { Level::Info } else { Level::Debug };
-            log_at(level, &format!("{}: {text}", server_name(key)));
-            if t <= 2 {
-                add_server_message(message_severity(t), key, text);
-            }
+            log_at(
+                Level::Debug,
+                &format!(
+                    "{}: {}",
+                    server_name(key),
+                    msg["params"]["message"].as_str().unwrap_or("")
+                ),
+            );
         }
         Some(_) => {}
         None if has_id => {
@@ -1013,14 +939,14 @@ fn handle(key: &str, msg: Value) {
                 let method = reply.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
                 if code != -32800 && code != -32801 {
                     log_at(
-                        Level::Info,
+                        Level::Warn,
                         &format!("{} {method}: {text}", server_name(key)),
                     );
                     if !method.starts_with("textDocument/documentHighlight")
                         && !method.starts_with("textDocument/hover")
                         && !method.starts_with("textDocument/signatureHelp")
                     {
-                        add_server_message("error", key, text);
+                        message(&format!("[cairn] {}: {text}", server_name(key)));
                     }
                 }
                 // A failed resolve must still unblock the completion list
@@ -1956,7 +1882,7 @@ fn goto_diagnostic(forward: bool, n: i64) -> Result<(), String> {
     Ok(())
 }
 
-// ----------------------------------------------------------------- eldoc
+// ----------------------------------------------------------------- help
 
 fn diagnostic_at(b: &Buffer) -> Option<String> {
     let uri = with(|s| s.docs.get(&b.id()).map(|d| d.uri.clone()))?;
@@ -1971,16 +1897,47 @@ fn diagnostic_at(b: &Buffer) -> Option<String> {
         .map(diag_text)
 }
 
-/// Show `text` in the echo area if nothing else is there (or eldoc put
-/// what is there).
-fn eldoc_message(text: &str) {
-    let current = minibuffer::current_message();
-    let ours = with(|s| s.eldoc_shown.clone());
-    if current.is_some() && current != ours {
+/// Show `text` in the help overlay at point, or take it down when empty.
+fn show_help(text: &str) {
+    let rows: Vec<String> = text.lines().map(str::to_string).collect();
+    if rows.is_empty() {
+        close_help();
         return;
     }
-    message(text);
-    with(|s| s.eldoc_shown = Some(text.to_string()));
+    let row_refs: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let open = with(|s| s.help_overlay.clone());
+    if let Some(id) = open {
+        if update_overlay(&id, &row_refs).is_ok() {
+            return;
+        }
+        with(|s| s.help_overlay = None);
+    }
+    if let Ok(id) = open_overlay("help", &row_refs) {
+        with(|s| s.help_overlay = Some(id));
+    }
+}
+
+/// Take the help overlay down.
+fn close_help() {
+    if let Some(id) = with(|s| s.help_overlay.take()) {
+        let _ = close_overlay(&id);
+    }
+}
+
+/// The `overlay.closed` observer: forget the help overlay's id when the
+/// host takes it down.
+fn help_overlay_closed() -> Result<(), String> {
+    let Some(call) = current_hook() else {
+        return Ok(());
+    };
+    let payload: Value = serde_json::from_str(&call.payload).unwrap_or(Value::Null);
+    let id = payload["id"].as_str().unwrap_or("");
+    with(|s| {
+        if s.help_overlay.as_deref() == Some(id) {
+            s.help_overlay = None;
+        }
+    });
+    Ok(())
 }
 
 /// The name before the parentheses point is in (for the echo area).
@@ -2025,9 +1982,10 @@ fn in_call(b: &Buffer) -> bool {
 }
 
 /// Documentation for what's at point (`force`: asked for, so say so when
-/// there is none, and don't mind what the echo area shows).
-fn eldoc(force: bool) {
+/// there is none). The summary shows in an overlay at point.
+fn help_at_point(force: bool) {
     let Ok((b, key, uri)) = current_doc() else {
+        close_help();
         if force {
             message("Cairn isn't managing this buffer");
         }
@@ -2035,10 +1993,10 @@ fn eldoc(force: bool) {
     };
     let p = b.point();
     let spot = (b.id(), b.version(), p.line, p.column);
-    if !force && with(|s| s.last_eldoc == Some(spot)) {
+    if !force && with(|s| s.last_help == Some(spot)) {
         return;
     }
-    with(|s| s.last_eldoc = Some(spot));
+    with(|s| s.last_help = Some(spot));
     let params = doc_position(&b, &uri);
     // Signature help inside a call, else the symbol's documentation.
     let word = word_at(&b);
@@ -2050,6 +2008,7 @@ fn eldoc(force: bool) {
     let use_sig = !on_callee && in_call(&b) && can(&key, "signatureHelpProvider");
     if diagnostic_at(&b).is_some() && !force {
         // Flymake's message is what shows here.
+        close_help();
     } else if use_sig {
         let k2 = key.clone();
         let p2 = params.clone();
@@ -2060,35 +2019,33 @@ fn eldoc(force: bool) {
             }
             let text = protocol::signature_line(&result, &callee);
             if text.is_empty() {
+                close_help();
                 if on_word {
-                    eldoc_hover(&k2, p2, force, spot);
+                    hover_help(&k2, p2, force, spot);
                 }
                 return;
             }
-            with(|s| s.eldoc_doc = text.clone());
-            if force {
-                message(&text);
-            } else {
-                eldoc_message(&text);
-            }
+            with(|s| s.help_doc = text.clone());
+            show_help(&text);
         });
     } else if on_word || force {
-        eldoc_hover(&key, params, force, spot);
+        hover_help(&key, params, force, spot);
     }
     if !force {
         highlight(&b, &key, &uri);
     }
 }
 
-/// Is point still where eldoc asked about?
+/// Is point still where the help request asked about?
 fn still_at(spot: (u32, u64, u32, u32)) -> bool {
     let c = Buffer::current();
     let p = c.point();
     (c.id(), c.version(), p.line, p.column) == spot
 }
 
-fn eldoc_hover(key: &str, params: Value, force: bool, spot: (u32, u64, u32, u32)) {
+fn hover_help(key: &str, params: Value, force: bool, spot: (u32, u64, u32, u32)) {
     if !can(key, "hoverProvider") {
+        close_help();
         if force {
             message("No documentation here");
         }
@@ -2102,19 +2059,18 @@ fn eldoc_hover(key: &str, params: Value, force: bool, spot: (u32, u64, u32, u32)
             .get("contents")
             .map(protocol::markup_text)
             .unwrap_or_default();
-        with(|s| s.eldoc_doc = full);
+        with(|s| s.help_doc = full);
         let text = result
             .get("contents")
             .map(protocol::hover_summary)
             .unwrap_or_default();
         if text.is_empty() {
+            close_help();
             if force {
                 message("No documentation here");
             }
-        } else if force {
-            message(&text);
         } else {
-            eldoc_message(&text);
+            show_help(&text);
         }
     });
 }
@@ -2159,10 +2115,10 @@ fn highlight(b: &Buffer, key: &str, uri: &str) {
     );
 }
 
-fn show_doc_buffer(text: &str) {
-    let b = match Buffer::find("*eldoc*") {
+fn show_help_buffer(text: &str) {
+    let b = match Buffer::find("*cairn-help*") {
         Some(b) => b,
-        None => Buffer::create("*eldoc*"),
+        None => Buffer::create("*cairn-help*"),
     };
     let _ = b.set_major_mode("special-mode");
     let _ = b.set_option("read-only", "true");
@@ -2945,6 +2901,9 @@ fn resolve_location(sel: &Selection) {
 
 fn init() -> Result<(), String> {
     define_list_modes();
+    with(|s| s.completion_auto = true);
+    completion::set_at_point_ui(true, true, 200, 2, 10);
+    completion::set_popup_info(true, false, 250, 60, 10);
 
     on(EventKind::BufferOpened, |e| {
         if let Some(b) = buffer_of(e) {
@@ -2989,6 +2948,7 @@ fn init() -> Result<(), String> {
         .flat_map(|s| s.modes.clone())
         .collect();
     completion_source("cairn", &modes, |req| {
+        close_help();
         let Some(b) = Buffer::from_id(req.buffer) else {
             return;
         };
@@ -3120,9 +3080,26 @@ fn init() -> Result<(), String> {
         |_| progress_overlay_closed(),
     )?;
     command(
-        "cairn-clear-messages",
-        "Dismiss the server messages.",
-        |_| clear_messages(),
+        "cairn-help-closed",
+        "Forget a help overlay that Forge closed.",
+        |_| help_overlay_closed(),
+    )?;
+    command(
+        "cairn-completion-auto",
+        "Toggle the completion popup opening by itself while typing.",
+        |_| {
+            let auto = with(|s| {
+                s.completion_auto = !s.completion_auto;
+                s.completion_auto
+            });
+            completion::set_at_point_ui(true, auto, 200, 2, 10);
+            message(if auto {
+                "Completion popup: automatic"
+            } else {
+                "Completion popup: only on M-TAB"
+            });
+            Ok(())
+        },
     )?;
 
     // --- servers
@@ -3256,7 +3233,7 @@ fn init() -> Result<(), String> {
             .or_else(|| b.path().map(|p| root_of(&p)))
             .unwrap_or_default();
             let settings = config::settings(&project_config(&root), &root);
-            show_doc_buffer(&serde_json::to_string_pretty(&settings).unwrap_or_default());
+            show_help_buffer(&serde_json::to_string_pretty(&settings).unwrap_or_default());
             Ok(())
         },
     )?;
@@ -3376,18 +3353,18 @@ fn init() -> Result<(), String> {
         |_| list_move(false),
     )?;
 
-    // --- eldoc
+    // --- help
     command(
-        "eldoc",
-        "Show the documentation (or signature) of the thing at point (C-h .).",
+        "cairn-help",
+        "Show the documentation or signature of the thing at point.",
         |_| {
-            eldoc(true);
+            help_at_point(true);
             Ok(())
         },
     )?;
     command(
-        "eldoc-doc-buffer",
-        "Show all of the documentation of the thing at point in *eldoc*.",
+        "cairn-help-buffer",
+        "Show all of the documentation of the thing at point in *cairn-help*.",
         |_| {
             let (b, key, uri) = current_doc()?;
             require(&key, "hoverProvider", "show documentation")?;
@@ -3403,7 +3380,7 @@ fn init() -> Result<(), String> {
                     if text.is_empty() {
                         message("No documentation here");
                     } else {
-                        show_doc_buffer(&text);
+                        show_help_buffer(&text);
                     }
                 },
             );
@@ -3413,11 +3390,11 @@ fn init() -> Result<(), String> {
     let idle = config().idle;
     when_idle(
         "cairn--on-idle",
-        "Cairn's idle work: eldoc and symbol highlighting.",
+        "Cairn's idle work: help and symbol highlighting.",
         idle,
         || {
-            if config().eldoc {
-                eldoc(false);
+            if config().help {
+                help_at_point(false);
             }
         },
     )?;
@@ -3558,8 +3535,8 @@ fn init() -> Result<(), String> {
             move |_| run(),
         )
     };
-    alias("lsp-hover", "eldoc", || {
-        eldoc(true);
+    alias("lsp-hover", "cairn-help", || {
+        help_at_point(true);
         Ok(())
     })?;
     alias("lsp-find-definition", "xref-find-definitions", || {
@@ -3604,7 +3581,7 @@ fn init() -> Result<(), String> {
         ("M-,", "xref-go-back"),
         ("C-M-,", "xref-go-forward"),
         ("C-M-.", "xref-find-apropos"),
-        ("C-h .", "eldoc"),
+        ("C-h .", "cairn-help"),
     ] {
         let _ = keymap::bind(&Scope::Global, keys, cmd);
     }

@@ -3,7 +3,7 @@ name = "forge-lsp"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Cairn: a Language Server Protocol client (Flymake diagnostics, xref, eldoc, rename, code actions, formatting, completion, hierarchies)"
+description = "Cairn: a Language Server Protocol client (Flymake diagnostics, xref, help, rename, code actions, formatting, completion, hierarchies)"
 
 [package.metadata.forge]
 name = "lsp"
@@ -13,12 +13,20 @@ name = "cairn-doctor"
 summary = "Check that the language servers Cairn may start are installed."
 
 [[package.metadata.forge.commands]]
+name = "cairn-help"
+summary = "Show the documentation or signature of the thing at point."
+
+[[package.metadata.forge.commands]]
 name = "cairn-progress-closed"
 summary = "Forget a progress overlay that Forge closed."
 
 [[package.metadata.forge.commands]]
-name = "cairn-clear-messages"
-summary = "Dismiss the server messages."
+name = "cairn-help-closed"
+summary = "Forget a help overlay that Forge closed."
+
+[[package.metadata.forge.commands]]
+name = "cairn-completion-auto"
+summary = "Toggle the completion popup opening by itself while typing."
 
 # The progress panel that follows the servers' work-done reports.
 [[package.metadata.forge.overlay-kinds]]
@@ -28,14 +36,14 @@ placement = "bottom"
 height = 4
 title = "Cairn"
 
-# Server notifications, newest first, until dismissed.
+# Documentation and signatures for the thing at point.
 [[package.metadata.forge.overlay-kinds]]
-id = "messages"
-handler = "cairn-clear-messages"
-placement = "top"
-height = 6
-width = 70
-title = "Cairn messages"
+id = "help"
+handler = "cairn-help-closed"
+placement = "float"
+width = 64
+height = 10
+title = "Cairn help"
 
 # The host removes this plugin's overlays when it unloads; forget the id
 # when the user closes one with C-g or overlay-close.
@@ -46,9 +54,9 @@ handler = "cairn-progress-closed"
 payload-version = 1
 
 [[package.metadata.forge.hooks]]
-id = "messages-closed"
+id = "help-closed"
 event = "overlay.closed"
-handler = "cairn-clear-messages"
+handler = "cairn-help-closed"
 payload-version = 1
 
 [[package.metadata.forge.doctor-checks]]

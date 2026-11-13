@@ -5,9 +5,7 @@ file whose mode has a server and that server starts for the project (one
 per server program and project root). `M-x cairn` starts one by hand. The
 mode line shows `[cairn:PROJECT]`, any progress the server reports, and
 the file's Flymake counts (`2E 1W`). While a server reports work in
-progress, a small panel at the bottom of the screen lists it too. Server
-notifications go in a panel at the top, newest first, until you close it
-or run `M-x cairn-clear-messages`.
+progress, a small panel at the bottom of the screen lists it too.
 
 ## Servers
 
@@ -47,11 +45,12 @@ environment, which it uses only to find server programs.
     (RET visits, `o` shows, `n`/`p` move).
   - `cairn-find-declaration`, `cairn-find-implementation` and
     `cairn-find-typeDefinition` work the same way.
-- **Eldoc.** When idle, the echo area shows the documentation of the
-  symbol at point. On an argument of a call it shows the call's signature
-  instead, with the current parameter marked `‹so›`. Other occurrences of
-  the symbol get the `symbol-highlight` face. `C-h .` (`eldoc`) asks
-  straight away, and `M-x eldoc-doc-buffer` shows the full documentation.
+- **Help.** When idle, an overlay at point shows the documentation of
+  the symbol at point. On an argument of a call it shows the call's
+  signature instead, with the current parameter marked `‹so›`. Other
+  occurrences of the symbol get the `symbol-highlight` face. `C-h .`
+  (`cairn-help`) asks straight away, and `M-x cairn-help-buffer` shows the
+  full documentation. `C-g` closes the overlay.
 - **Editing.**
   - `cairn-rename` renames everywhere the server knows the symbol.
   - `cairn-format` formats the region, or the buffer when there is no
@@ -63,8 +62,10 @@ environment, which it uses only to find server programs.
   into buffers, never straight to disk. Files that weren't open are
   visited and left unsaved for you to review. File creations, renames
   and deletions requested by the server happen as asked.
-- **Completion.** It is a completion source, so the corfu popup or `M-TAB`
-  offers the server's completions.
+- **Completion.** It is a completion source that opens a popup at point,
+  with the selected candidate's documentation beside it. The popup opens
+  after a typing pause or on `M-TAB`, and `C-g` closes it.
+  `M-x cairn-completion-auto` turns the automatic popup off and on.
 - **Navigation.**
   - `M-g i` in a managed buffer is imenu built from the server's symbols.
   - `cairn-show-call-hierarchy` and `cairn-show-type-hierarchy` draw trees
@@ -80,7 +81,7 @@ environment, which it uses only to find server programs.
     or stop servers.
   - `cairn-doctor` reports modes whose servers are not on `PATH`, and
     configuration files that don't parse.
-  - `cairn-clear-messages` dismisses the server messages panel.
+  - `cairn-completion-auto` toggles the automatic completion popup.
   - Also: `cairn-forget-pending-continuations`, `cairn-clear-status`.
 
 The old `lsp-*` command names still work.
@@ -94,7 +95,7 @@ own `.cairn.json` at its root adds to it, playing the part of Emacs's
 ```json
 {
   "autostart": true,
-  "eldoc": true,
+  "help": true,
   "highlight-symbols": true,
   "idle-delay": 0.5,
   "events-buffer-size": 2000,
@@ -133,7 +134,7 @@ in `~/.config/forge/lua/`. Forge writes and updates `forge.lua` there (and a
 incremental sync ranges, workspace edits, signatures, symbols and the
 configuration. `sdks/test.sh lsp` builds the plugin and checks it end to
 end against pyright: connection, mode line, Flymake, xref and going back,
-eldoc, completion, references, rename. `sdks/test.sh cairn` runs only
+help, completion, references, rename. `sdks/test.sh cairn` runs only
 those checks, on a plugin already built.
 
 ## Not yet
