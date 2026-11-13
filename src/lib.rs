@@ -174,6 +174,10 @@ struct State {
     resolving: HashMap<u32, Resolving>,
     /// The host id of the overlay showing work-done progress.
     progress_overlay: Option<String>,
+    /// Server notifications, newest first.
+    messages: Vec<String>,
+    /// The host id of the overlay showing those notifications.
+    messages_overlay: Option<String>,
     /// Numbers server keys.
     serial: u64,
 }
@@ -771,7 +775,8 @@ fn on_server_request(key: &str, msg: &Value) {
                 .filter_map(|a| a["title"].as_str().map(String::from))
                 .collect();
             if actions.is_empty() {
-                message(&format!("{}: {text}", server_name(key)));
+                let t = params["type"].as_u64().unwrap_or(3);
+                add_server_message(message_severity(t), key, &text);
                 return reply_ok(key, &id, Value::Null);
             }
             let k = key.to_string();
@@ -789,7 +794,7 @@ fn on_server_request(key: &str, msg: &Value) {
         "window/showDocument" => {
             let uri = params["uri"].as_str().unwrap_or("");
             if params["external"].as_bool() == Some(true) || !uri.starts_with("file://") {
-                message(&format!("[cairn] The server wants you to open {uri}"));
+                add_server_message("info", key, &format!("The server wants you to open {uri}"));
                 return reply_ok(key, &id, json!({ "success": false }));
             }
             let loc = params
@@ -899,6 +904,77 @@ fn progress_overlay_closed() -> Result<(), String> {
     Ok(())
 }
 
+/// A word for an LSP MessageType (1 error, 2 warning, 3 info, 4 log).
+fn message_severity(t: u64) -> &'static str {
+    match t {
+        1 => "error",
+        2 => "warning",
+        3 => "info",
+        _ => "log",
+    }
+}
+
+/// Remember a server notification on top of the messages overlay.
+fn add_server_message(severity: &str, key: &str, text: &str) {
+    let row = format!("{severity}: {}: {text}", server_name(key));
+    let duplicate = with(|s| s.messages.first() == Some(&row));
+    if !duplicate {
+        with(|s| {
+            s.messages.insert(0, row);
+            s.messages.truncate(50);
+        });
+    }
+    refresh_messages_overlay();
+}
+
+/// Show the remembered server notifications, or take the overlay down when
+/// there are none.
+fn refresh_messages_overlay() {
+    let rows = with(|s| s.messages.clone());
+    if rows.is_empty() {
+        if let Some(id) = with(|s| s.messages_overlay.take()) {
+            let _ = close_overlay(&id);
+        }
+        return;
+    }
+    let row_refs: Vec<&str> = rows.iter().map(String::as_str).collect();
+    let open = with(|s| s.messages_overlay.clone());
+    match open {
+        Some(id) => {
+            if update_overlay(&id, &row_refs).is_err() {
+                with(|s| s.messages_overlay = None);
+                refresh_messages_overlay();
+            }
+        }
+        None => {
+            if let Ok(id) = open_overlay("messages", &row_refs) {
+                with(|s| s.messages_overlay = Some(id));
+            }
+        }
+    }
+}
+
+/// Dismiss the server notifications, whether the user asked for it or the
+/// host closed the overlay.
+fn clear_messages() -> Result<(), String> {
+    if let Some(call) = current_hook() {
+        let payload: Value = serde_json::from_str(&call.payload).unwrap_or(Value::Null);
+        let id = payload["id"].as_str().unwrap_or("");
+        let ours = with(|s| s.messages_overlay.as_deref() == Some(id));
+        if !ours {
+            return Ok(());
+        }
+    }
+    let id = with(|s| {
+        s.messages.clear();
+        s.messages_overlay.take()
+    });
+    if let Some(id) = id {
+        let _ = close_overlay(&id);
+    }
+    Ok(())
+}
+
 fn handle(key: &str, msg: Value) {
     log_event(key, "server", &msg);
     let has_id = msg.get("id").is_some_and(|i| !i.is_null());
@@ -910,19 +986,20 @@ fn handle(key: &str, msg: Value) {
             let t = msg["params"]["type"].as_u64().unwrap_or(4);
             let text = msg["params"]["message"].as_str().unwrap_or("");
             if t <= 3 {
-                message(&format!("[cairn] {}: {text}", server_name(key)));
+                add_server_message(message_severity(t), key, text);
             }
             log_at(Level::Info, &format!("{}: {text}", server_name(key)));
         }
         Some("window/logMessage") => {
-            log_at(
-                Level::Debug,
-                &format!(
-                    "{}: {}",
-                    server_name(key),
-                    msg["params"]["message"].as_str().unwrap_or("")
-                ),
-            );
+            let t = msg["params"]["type"].as_u64().unwrap_or(4);
+            let text = msg["params"]["message"].as_str().unwrap_or("");
+            // Errors and warnings also go to the messages overlay, so their
+            // log lines stay out of the echo area.
+            let level = if t <= 2 { Level::Info } else { Level::Debug };
+            log_at(level, &format!("{}: {text}", server_name(key)));
+            if t <= 2 {
+                add_server_message(message_severity(t), key, text);
+            }
         }
         Some(_) => {}
         None if has_id => {
@@ -936,14 +1013,14 @@ fn handle(key: &str, msg: Value) {
                 let method = reply.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
                 if code != -32800 && code != -32801 {
                     log_at(
-                        Level::Warn,
+                        Level::Info,
                         &format!("{} {method}: {text}", server_name(key)),
                     );
                     if !method.starts_with("textDocument/documentHighlight")
                         && !method.starts_with("textDocument/hover")
                         && !method.starts_with("textDocument/signatureHelp")
                     {
-                        message(&format!("[cairn] {}: {text}", server_name(key)));
+                        add_server_message("error", key, text);
                     }
                 }
                 // A failed resolve must still unblock the completion list
@@ -3041,6 +3118,11 @@ fn init() -> Result<(), String> {
         "cairn-progress-closed",
         "Forget a progress overlay that Forge closed.",
         |_| progress_overlay_closed(),
+    )?;
+    command(
+        "cairn-clear-messages",
+        "Dismiss the server messages.",
+        |_| clear_messages(),
     )?;
 
     // --- servers

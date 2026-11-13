@@ -5,7 +5,9 @@ file whose mode has a server and that server starts for the project (one
 per server program and project root). `M-x cairn` starts one by hand. The
 mode line shows `[cairn:PROJECT]`, any progress the server reports, and
 the file's Flymake counts (`2E 1W`). While a server reports work in
-progress, a small panel at the bottom of the screen lists it too.
+progress, a small panel at the bottom of the screen lists it too. Server
+notifications go in a panel at the top, newest first, until you close it
+or run `M-x cairn-clear-messages`.
 
 ## Servers
 
@@ -78,6 +80,7 @@ environment, which it uses only to find server programs.
     or stop servers.
   - `cairn-doctor` reports modes whose servers are not on `PATH`, and
     configuration files that don't parse.
+  - `cairn-clear-messages` dismisses the server messages panel.
   - Also: `cairn-forget-pending-continuations`, `cairn-clear-status`.
 
 The old `lsp-*` command names still work.

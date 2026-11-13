@@ -16,6 +16,10 @@ summary = "Check that the language servers Cairn may start are installed."
 name = "cairn-progress-closed"
 summary = "Forget a progress overlay that Forge closed."
 
+[[package.metadata.forge.commands]]
+name = "cairn-clear-messages"
+summary = "Dismiss the server messages."
+
 # The progress panel that follows the servers' work-done reports.
 [[package.metadata.forge.overlay-kinds]]
 id = "progress"
@@ -24,12 +28,27 @@ placement = "bottom"
 height = 4
 title = "Cairn"
 
+# Server notifications, newest first, until dismissed.
+[[package.metadata.forge.overlay-kinds]]
+id = "messages"
+handler = "cairn-clear-messages"
+placement = "top"
+height = 6
+width = 70
+title = "Cairn messages"
+
 # The host removes this plugin's overlays when it unloads; forget the id
 # when the user closes one with C-g or overlay-close.
 [[package.metadata.forge.hooks]]
 id = "progress-closed"
 event = "overlay.closed"
 handler = "cairn-progress-closed"
+payload-version = 1
+
+[[package.metadata.forge.hooks]]
+id = "messages-closed"
+event = "overlay.closed"
+handler = "cairn-clear-messages"
 payload-version = 1
 
 [[package.metadata.forge.doctor-checks]]
